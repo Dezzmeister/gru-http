@@ -11,7 +11,7 @@ The server uses Linux syscalls, so it will only build on Linux. To make a releas
 make release
 ```
 
-To make a debug build
+To make a debug build:
 
 ```sh
 make debug
