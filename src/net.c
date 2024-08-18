@@ -18,6 +18,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <netdb.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <unistd.h>
 #include "error.h"
@@ -49,10 +50,8 @@ static void print_http_res(struct http_res * res, pid_t tid) {
     printf("[Thread %d] <- %d %s\n", tid, res->status, http_status_names[res->status]);
 }
 
-static void * start_connection(void * thread_index) {
-    const size_t thread_i = (size_t) thread_index;
-    struct connection_thread * thread = threads + thread_i;
-
+static int start_connection_impl(struct connection_thread * thread) {
+    int peer_fd = atomic_load_explicit(&thread->peer_fd, memory_order_acquire);
     char buf[RECV_BUF_SIZE];
     int bytes_read;
 
@@ -64,7 +63,7 @@ static void * start_connection(void * thread_index) {
 
     struct http_req req = create_http_req();
     // TODO: Non-blocking IO so we can disconnect clients that are too slow
-    while ((bytes_read = read(thread->peer_fd, buf, RECV_BUF_SIZE - 1))) {
+    while ((bytes_read = read(peer_fd, buf, RECV_BUF_SIZE - 1))) {
         if (bytes_read == -1) {
             snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to read data from socket", tid_for_printing);
             perror(print_buf);
@@ -77,7 +76,7 @@ static void * start_connection(void * thread_index) {
 
             struct http_res res = handle_http_req(buf, bytes_read, &req);
             print_http_req(&req, tid_for_printing);
-            send_http_res(&res, thread->peer_fd);
+            send_http_res(&res, peer_fd);
             print_http_res(&res, tid_for_printing);
             free_http_res(&res);
             // Keep-Alive is not supported
@@ -88,19 +87,35 @@ static void * start_connection(void * thread_index) {
     free_http_req(&req);
 
     printf("[Thread %d] Closing socket\n", tid_for_printing);
-    shutdown(thread->peer_fd, SHUT_WR);
-    int status = close(thread->peer_fd);
+    shutdown(peer_fd, SHUT_WR);
+    int status = close(peer_fd);
 
     if (status == -1) {
         snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to close socket", tid_for_printing);
         perror(print_buf);
 
-        thread->active = 0;
-        return (void *) (uint64_t) errno;
+        return errno;
     }
 
-    thread->active = 0;
     return 0;
+}
+
+static void connection_handler_cleanup(void * arg) {
+    struct connection_thread * thread = arg;
+
+    atomic_store_explicit(&thread->active, 0, memory_order_release);
+}
+
+static void * start_connection(void * thread_index) {
+    const size_t thread_i = (size_t) thread_index;
+    struct connection_thread * thread = threads + thread_i;
+    int status;
+
+    pthread_cleanup_push(connection_handler_cleanup, thread);
+    status = start_connection_impl(thread);
+    pthread_cleanup_pop(1);
+
+    return (void *) (uint64_t) status;
 }
 
 void listen_for_connections(const struct sockaddr_in * my_addr) {
@@ -152,7 +167,7 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
 
         while (1) {
             for (size_t i = 0; i < MAX_THREADS; i++) {
-                if (! threads[i].active) {
+                if (! atomic_load_explicit(&threads[i].active, memory_order_acquire)) {
                     thread_i = i;
                     goto thread_i_found;
                 }
@@ -162,9 +177,8 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
             sleep(1);
         }
         thread_i_found:
-        threads[thread_i].peer = peer_sock;
-        threads[thread_i].peer_fd = peer_sock_fd;
-        threads[thread_i].active = 1;
+        atomic_store_explicit(&threads[thread_i].peer_fd, peer_sock_fd, memory_order_release);
+        atomic_store_explicit(&threads[thread_i].active, 1, memory_order_release);
 
         pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
     }

@@ -4,7 +4,7 @@ TEST_SRC_DIR := test/src
 TEST_INC_DIR := test/include
 TEST_BINARY := test_bin
 
-CC := gcc
+CC := clang
 CFLAGS := -Wall -Werror -std=gnu17 -pthread
 LDFLAGS := -lpthread
 
@@ -36,7 +36,7 @@ TEST_OBJS = \
 
 .PHONY: clean
 
-debug: CFLAGS += -g -Og -fsanitize=unreachable -fsanitize=undefined
+debug: CFLAGS += -g -Og -fsanitize=unreachable -fsanitize=undefined -fsanitize=thread
 debug: LDFLAGS += -lg
 release: CFLAGS += -O3 -march=native
 test: CFLAGS += -DTEST -fsanitize=unreachable -fsanitize=undefined

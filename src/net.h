@@ -25,9 +25,8 @@
 
 struct connection_thread {
     pthread_t thread;
-    struct sockaddr_in peer;
-    int peer_fd;
-    int active;
+    _Atomic int peer_fd;
+    _Atomic int active;
 };
 
 void listen_for_connections(const struct sockaddr_in * my_addr);
