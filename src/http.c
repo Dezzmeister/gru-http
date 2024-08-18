@@ -20,12 +20,12 @@
 #include <unistd.h>
 #include "http.h"
 
-const char * header_names[HEADER_MAX] = {
-    [HEADER_ACCEPT] = "accept",
-    [HEADER_CONTENT_TYPE] = "content-type",
-    [HEADER_CONTENT_LENGTH] = "content-length",
-    [HEADER_USER_AGENT] = "user-agent",
-    [HEADER_HOST] = "host"
+const char * req_header_names[REQ_HEADER_MAX] = {
+    [REQ_HEADER_ACCEPT] = "accept",
+    [REQ_HEADER_CONTENT_TYPE] = "content-type",
+    [REQ_HEADER_CONTENT_LENGTH] = "content-length",
+    [REQ_HEADER_USER_AGENT] = "user-agent",
+    [REQ_HEADER_HOST] = "host"
 };
 
 const char * http_method_names[] = {
@@ -46,11 +46,9 @@ static const char http_version[] = "HTTP/1.1";
 // Parses an HTTP request line into an `http_req` object and returns either a status code or
 // zero. If a status code is returned, then that should be sent back to the client immediately.
 // Otherwise, the remainder of the request should be processed.
-static http_status_code parse_req_line(const char * restrict in_buf, char * restrict out_buf, size_t buf_size, struct http_req * req) {
-    size_t out_pos = 0;
-
+static http_status_code parse_req_line(const char * restrict in_buf, size_t buf_size, struct http_req * req) {
     while (in_buf[req->seek] != ' ') {
-        if (req->seek >= buf_size) {
+        if (req->seek >= buf_size - 1) {
             return HTTP_BAD_REQUEST;
         }
 
@@ -70,24 +68,24 @@ static http_status_code parse_req_line(const char * restrict in_buf, char * rest
 
     // Consume the space
     req->seek++;
+    size_t seek_end = req->seek;
 
     // A request target must not contain whitespace. For now, we'll just keep reading until we hit
     // a space.
-    while (in_buf[req->seek] != ' ') {
-        if (req->seek >= buf_size) {
+    while (in_buf[seek_end] != ' ') {
+        if (seek_end >= buf_size - 1) {
             return HTTP_URI_TOO_LONG;
         }
 
-        out_buf[out_pos++] = in_buf[req->seek++];
+        seek_end++;
     }
 
-    out_buf[out_pos++] = 0;
-
-    req->target = malloc(out_pos);
-    memcpy(req->target, out_buf, out_pos);
+    req->target = malloc(seek_end - req->seek + 1);
+    memcpy(req->target, in_buf + req->seek, seek_end - req->seek);
+    req->target[seek_end - req->seek] = 0;
 
     // Consume the space
-    req->seek++;
+    req->seek = seek_end + 1;
 
     // At this point we can just compare the remaining few characters to the expected HTTP
     // version string and fail if they don't match
@@ -112,32 +110,170 @@ static http_status_code parse_req_line(const char * restrict in_buf, char * rest
     return 0;
 }
 
+static char lowercase(char in) {
+    if ('A' <= in && in <= 'Z') {
+        return (in - 'A') + 'a';
+    }
+
+    return in;
+}
+
+static int is_whitespace(char in) {
+    return in == ' ' || in == '\t';
+}
+
+static int strncmp_ignore_case(const char * restrict a, const char * restrict b, size_t n) {
+    size_t i = 0;
+
+    while (i < n && a[i] && b[i]) {
+        if (lowercase(a[i]) != lowercase(b[i])) {
+            break;
+        }
+
+        i++;
+    }
+
+    if (i < n) {
+        return ((unsigned char) lowercase(a[i])) - ((unsigned char) lowercase(b[i]));
+    }
+
+    return 0;
+}
+
+static http_status_code parse_field_line(const char * in_buf, size_t buf_size, struct http_req * req) {
+    size_t seek_end = req->seek;
+
+    while (in_buf[seek_end] != ':') {
+        if (seek_end >= buf_size - 1) {
+            return HTTP_BAD_REQUEST;
+        }
+
+        seek_end++;
+    }
+
+    int req_header = -1;
+
+    for (int i = 0; i < REQ_HEADER_MAX; i++) {
+        if (! strncmp_ignore_case(in_buf + req->seek, req_header_names[i], seek_end - req->seek)) {
+            req_header = i;
+            break;
+        }
+    }
+
+    req->seek = seek_end + 1;
+
+    // TODO: Custom headers. No idea what we would even do with these
+
+    while (is_whitespace(in_buf[req->seek])) {
+        if (req->seek >= buf_size - 1) {
+            return HTTP_BAD_REQUEST;
+        }
+
+        req->seek++;
+    }
+
+    seek_end = req->seek;
+
+    while (in_buf[seek_end] != '\r') {
+        if (seek_end >= buf_size - 3) {
+            return HTTP_BAD_REQUEST;
+        }
+
+        seek_end++;
+    }
+
+    if (in_buf[seek_end + 1] != '\n') {
+        return HTTP_BAD_REQUEST;
+    }
+
+    while (is_whitespace(in_buf[seek_end])) {
+        seek_end--;
+    }
+
+    if (req_header == -1) {
+        return 0;
+    }
+
+    req->headers.known[req_header] = malloc(seek_end - req->seek + 1);
+    memcpy(req->headers.known[req_header], in_buf + req->seek, seek_end - req->seek);
+    req->headers.known[req_header][seek_end - req->seek] = 0;
+
+    req->seek = seek_end + 2;
+
+    return 0;
+}
+
+static http_status_code parse_field_lines(const char * in_buf, size_t buf_size, struct http_req * req) {
+    http_status_code last_line_result = 0;
+
+    if (req->seek >= buf_size) {
+        return HTTP_BAD_REQUEST;
+    }
+
+    while (in_buf[req->seek] != '\r' && ! last_line_result) {
+        last_line_result = parse_field_line(in_buf, buf_size, req);
+    }
+
+    if (last_line_result) {
+        return last_line_result;
+    }
+
+    if (req->seek >= buf_size - 1) {
+        return HTTP_BAD_REQUEST;
+    }
+
+    if (in_buf[++req->seek] != '\n') {
+        return HTTP_BAD_REQUEST;
+    }
+
+    return 0;
+}
+
 struct http_req create_http_req() {
     struct http_req out = {
+        .headers = {
+            .known = {}
+        },
         .target = NULL,
         .method = Unknown,
         .seek = 0
     };
 
+    for (size_t i = 0; i < REQ_HEADER_MAX; i++) {
+        out.headers.known[i] = NULL;
+    }
+
     return out;
 }
 
 void free_http_req(struct http_req * req) {
-    // TODO: Free headers
+    for (size_t i = 0; i < REQ_HEADER_MAX; i++) {
+        if (req->headers.known[i]) {
+            free(req->headers.known[i]);
+        }
+    }
 
     if (req->target) {
         free(req->target);
     }
 }
 
-struct http_res handle_http_req(const char * restrict in_buf, char * restrict out_tmp, size_t buf_size, struct http_req * req) {
-    http_status_code req_line_status = parse_req_line(in_buf, out_tmp, buf_size, req);
-
-    // TODO: Read headers
+struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req) {
+    http_status_code req_line_status = parse_req_line(in_buf, buf_size, req);
 
     if (req_line_status) {
         struct http_res out = {
             .status = req_line_status
+        };
+
+        return out;
+    }
+
+    http_status_code field_lines_status = parse_field_lines(in_buf, buf_size, req);
+
+    if (field_lines_status) {
+        struct http_res out = {
+            .status = field_lines_status
         };
 
         return out;

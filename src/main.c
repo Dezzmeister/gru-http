@@ -18,96 +18,101 @@
 // Uncomment this to print raw request data
 // #define DEBUG_PRINT_RAW_REQ
 
+#include <argp.h>
 #include <arpa/inet.h>
-#include <errno.h>
-#include <netdb.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>
 #include <unistd.h>
-#include "ip.h"
+#include "error.h"
 #include "net.h"
 
-#define die() debug_die(__LINE__)
+const char * argp_program_version = "gru-http 1.0";
+const char * argp_program_bug_address = "dezzmeister16@gmail.com";
+static const char doc[] = 
+"gru-http is a simple HTTP 1.1 server capable of serving static files. "
+"The source code is available at https://github.com/Dezzmeister/gru-http."
+"\v"
+"The first argument is an IPv4 address, formatted as 4 decimal octets separated "
+"by periods. The second argument is a TCP port (in the range [1, 65535]). The "
+"server will bind to the given IP address and listen on the given port.";
 
-void debug_die(int line) {
-    int error_code = errno;
+static char * ip_str;
+static char * port_str;
 
-    perror("Fatal error");
-    printf("Line: %d\n", line);
-    exit(error_code);
+static error_t arg_parser(int key, char * arg, struct argp_state * state) {
+    static int arg_index = 0;
+
+    switch (key) {
+        case ARGP_KEY_ARG: {
+            switch (arg_index) {
+                case 0: {
+                    ip_str = arg;
+                    break;
+                }
+                case 1: {
+                    port_str = arg;
+                    break;
+                }
+                default: {
+                    argp_usage(state);
+                    break;
+                }
+            }
+            arg_index++;
+            return 0;
+        }
+        case ARGP_KEY_END: {
+            if (arg_index < 2) {
+                argp_usage(state);
+            }
+            break;
+        }
+        default:
+            return ARGP_ERR_UNKNOWN;
+    }
+
+    return 0;
 }
 
-int main(int argc, const char * const * const argv) {
-    struct protoent * ent = getprotobyname("tcp");
+int main(int argc, char ** const argv) {
+    struct argp parser = {
+        .options = NULL,
+        .parser = arg_parser,
+        .args_doc = "IPV4 PORT",
+        .doc = doc,
+        .children = NULL,
+        .help_filter = NULL,
+        .argp_domain = NULL
+    };
 
-    if (! ent) {
+    error_t argp_result = argp_parse(&parser, argc, argv, 0, NULL, NULL);
+
+    if (argp_result) {
         die();
+    }
+
+    int port = atoi(port_str);
+
+    if (! port || port > 65535) {
+        printf("Port is not valid\n");
+        exit(1);
     }
 
     struct sockaddr_in my_addr = {
-        // TODO: Args
         .sin_addr = {
             .s_addr = 0
         },
-        .sin_port = htons(8000),
+        .sin_port = htons(port),
         .sin_family = AF_INET
     };
 
-    int sock_fd = socket(AF_INET, SOCK_STREAM, ent->p_proto);
+    int ip_str_result = inet_aton(ip_str, &my_addr.sin_addr);
 
-    if (sock_fd == -1) {
-        die();
+    if (! ip_str_result) {
+        printf("IP address is not valid\n");
+        exit(1);
     }
 
-    int status = bind(sock_fd, (const struct sockaddr *) &my_addr, sizeof my_addr);
+    listen_for_connections(&my_addr);
 
-    if (status == -1) {
-        die();
-    }
-
-    status = listen(sock_fd, 1);
-
-    if (status == -1) {
-        die();
-    }
-
-    struct sockaddr_in peer_sock;
-    int peer_sock_fd;
-    socklen_t peer_len = sizeof peer_sock;
-
-    while ((peer_sock_fd = accept(sock_fd, (struct sockaddr *) &peer_sock, &peer_len)) != -1) {
-        char * const ip_str = fmt_ipv4_addr(peer_sock.sin_addr);
-
-        if (ip_str) {
-            printf("Accepted a connection from %s:%d\n", ip_str, peer_sock.sin_port);
-            free(ip_str);
-        } else {
-            printf("IP string was null\n");
-        }
-
-        size_t thread_i;
-
-        while (1) {
-            for (size_t i = 0; i < MAX_THREADS; i++) {
-                if (! threads[i].active) {
-                    thread_i = i;
-                    goto thread_i_found;
-                }
-            }
-
-            // We'll wait for a thread to die
-            sleep(1);
-        }
-        thread_i_found:
-        threads[thread_i].peer = peer_sock;
-        threads[thread_i].peer_fd = peer_sock_fd;
-        threads[thread_i].active = 1;
-
-        pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
-    }
-
-    printf("Shutting down...\n");
-    close(sock_fd);
-    die();
+    return 0;
 }

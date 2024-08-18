@@ -20,19 +20,20 @@
 #include <stdlib.h>
 #include "status.h"
 
-#define HEADER_ACCEPT           0
-#define HEADER_CONTENT_TYPE     1
-#define HEADER_CONTENT_LENGTH   2
-#define HEADER_USER_AGENT       3
-#define HEADER_HOST             4
-#define HEADER_MAX              5
+#define REQ_HEADER_ACCEPT           0
+#define REQ_HEADER_CONTENT_TYPE     1
+#define REQ_HEADER_CONTENT_LENGTH   2
+#define REQ_HEADER_USER_AGENT       3
+#define REQ_HEADER_HOST             4
+#define REQ_HEADER_MAX              5
 
 #define ARR_SIZE(arr)           ((sizeof (arr)) / sizeof ((arr)[0]))
 
-extern const char * header_names[HEADER_MAX];
+extern const char * req_header_names[REQ_HEADER_MAX];
 
-struct headers {
-    void * headers[HEADER_MAX];
+struct req_headers {
+    char * known[REQ_HEADER_MAX];
+    // TODO: Custom headers
 };
 
 enum http_method {
@@ -51,7 +52,7 @@ enum http_method {
 extern const char * http_method_names[];
 
 struct http_req {
-    struct headers req_headers;
+    struct req_headers headers;
     char * target;
     enum http_method method;
     size_t seek;
@@ -63,7 +64,7 @@ struct http_res {
     http_status_code status;
 };
 
-struct http_res handle_http_req(const char * restrict in_buf, char * restrict out_tmp, size_t buf_size, struct http_req * req);
+struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req);
 void send_http_res(struct http_res * res, int out_sock_fd);
 
 #endif

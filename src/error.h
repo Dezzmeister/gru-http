@@ -15,24 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef SRC_NET_H
-#define SRC_NET_H
+#define die() debug_die(__FILE__, __LINE__)
 
-#include <arpa/inet.h>
-#include <pthread.h>
-
-#define MAX_THREADS     8
-
-struct connection_thread {
-    pthread_t thread;
-    struct sockaddr_in peer;
-    int peer_fd;
-    int active;
-};
-
-extern struct connection_thread threads[MAX_THREADS];
-
-void listen_for_connections(const struct sockaddr_in * my_addr);
-void * start_connection(void * thread_index);
-
-#endif
+void debug_die(const char * file, int line);

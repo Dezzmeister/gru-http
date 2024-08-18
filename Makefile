@@ -12,14 +12,16 @@ HEADERS = \
 		${INC_DIR}/ip.h \
 		${INC_DIR}/net.h \
 		${INC_DIR}/http.h \
-		${INC_DIR}/status.h
+		${INC_DIR}/status.h \
+		${INC_DIR}/error.h
 
 OBJS = \
 		${SRC_DIR}/main.o  \
 		${SRC_DIR}/ip.o  \
 		${SRC_DIR}/http.o  \
 		${SRC_DIR}/status.o  \
-		${SRC_DIR}/net.c
+		${SRC_DIR}/net.c \
+		${SRC_DIR}/error.c
 
 OBJS_NO_MAIN = $(filter-out ${SRC_DIR}/main.o, ${OBJS})
 
