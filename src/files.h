@@ -15,21 +15,20 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef SRC_NET_H
-#define SRC_NET_H
+#include <sys/types.h>
+#include <dirent.h>
 
-#include <arpa/inet.h>
-#include <pthread.h>
-
-#define MAX_THREADS     8
-
-struct connection_thread {
-    pthread_t thread;
-    struct sockaddr_in peer;
-    int peer_fd;
-    int active;
+struct file {
+    char path[256];
+    char * content;
+    struct file * next;
 };
 
-void listen_for_connections(const struct sockaddr_in * my_addr);
+struct http_static_dir {
+    char * root;
+    struct file * files;
+};
 
-#endif
+extern struct http_static_dir static_files;
+
+void load_static_dir(const char * dir);

@@ -15,17 +15,23 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "http.h"
 
 const char * req_header_names[REQ_HEADER_MAX] = {
-    [REQ_HEADER_ACCEPT] = "accept",
-    [REQ_HEADER_CONTENT_TYPE] = "content-type",
-    [REQ_HEADER_CONTENT_LENGTH] = "content-length",
-    [REQ_HEADER_USER_AGENT] = "user-agent",
-    [REQ_HEADER_HOST] = "host"
+    [REQ_HEADER_ACCEPT] = "Accept",
+    [REQ_HEADER_CONTENT_TYPE] = "Content-Type",
+    [REQ_HEADER_CONTENT_LENGTH] = "Content-Length",
+    [REQ_HEADER_USER_AGENT] = "User-Agent",
+    [REQ_HEADER_HOST] = "Host"
+};
+
+const char * res_header_names[RES_HEADER_MAX] = {
+    [RES_HEADER_CONTENT_LENGTH] = "Content-Length",
+    [RES_HEADER_CONTENT_TYPE] = "Content-Type"
 };
 
 const char * http_method_names[] = {
@@ -122,11 +128,20 @@ static int is_whitespace(char in) {
     return in == ' ' || in == '\t';
 }
 
-static int strncmp_ignore_case(const char * restrict a, const char * restrict b, size_t n) {
+static int is_known_header(const char * restrict header_in, size_t known_header_i, size_t header_in_len) {
     size_t i = 0;
 
-    while (i < n && a[i] && b[i]) {
-        if (lowercase(a[i]) != lowercase(b[i])) {
+    const char * restrict known_header = req_header_names[known_header_i];
+    const size_t known_header_len = strlen(known_header);
+
+    if (known_header_len != header_in_len) {
+        return 0;
+    }
+
+    const size_t n = header_in_len;
+
+    while (i < n && header_in[i] && known_header[i]) {
+        if (lowercase(header_in[i]) != lowercase(known_header[i])) {
             break;
         }
 
@@ -134,10 +149,10 @@ static int strncmp_ignore_case(const char * restrict a, const char * restrict b,
     }
 
     if (i < n) {
-        return ((unsigned char) lowercase(a[i])) - ((unsigned char) lowercase(b[i]));
+        return ((unsigned char) lowercase(header_in[i])) == ((unsigned char) lowercase(known_header[i]));
     }
 
-    return 0;
+    return 1;
 }
 
 static http_status_code parse_field_line(const char * in_buf, size_t buf_size, struct http_req * req) {
@@ -154,7 +169,7 @@ static http_status_code parse_field_line(const char * in_buf, size_t buf_size, s
     int req_header = -1;
 
     for (int i = 0; i < REQ_HEADER_MAX; i++) {
-        if (! strncmp_ignore_case(in_buf + req->seek, req_header_names[i], seek_end - req->seek)) {
+        if (is_known_header(in_buf + req->seek, i, seek_end - req->seek)) {
             req_header = i;
             break;
         }
@@ -191,6 +206,7 @@ static http_status_code parse_field_line(const char * in_buf, size_t buf_size, s
     }
 
     if (req_header == -1) {
+        req->seek = seek_end + 2;
         return 0;
     }
 
@@ -258,13 +274,65 @@ void free_http_req(struct http_req * req) {
     }
 }
 
+struct http_res create_http_res() {
+    struct http_res out = {
+        .headers = {
+            .headers = {}
+        },
+        .status = HTTP_INTERNAL_SERVER_ERROR,
+        .content = NULL
+    };
+
+    for (size_t i = 0; i < RES_HEADER_MAX; i++) {
+        out.headers.headers[i] = NULL;
+    }
+
+    return out;
+}
+
+void free_http_res(struct http_res * res) {
+    if (res->content) {
+        free(res->content);
+    }
+
+    for (size_t i = 0; i < RES_HEADER_MAX; i++) {
+        if (res->headers.headers[i]) {
+            free(res->headers.headers[i]);
+        }
+    }
+}
+
+static void set_http_status(struct http_res * res, http_status_code status) {
+    res->status = status;
+
+    if (res->content) {
+        return;
+    }
+
+    // We'll try to send a default message in the response body
+    int len = strlen(http_status_names[status]);
+
+    res->content = malloc(len + 1);
+    memcpy(res->content, http_status_names[status], len + 1);
+
+    size_t buf_size = sizeof(long) * 8 + 1;
+    char * len_str = malloc(buf_size);
+    snprintf(len_str, buf_size, "%d", len);
+    res->headers.headers[RES_HEADER_CONTENT_LENGTH] = len_str;
+
+    static const char default_content_type[] = "text/plain; charset=us-ascii";
+    char * type_str = malloc(ARR_SIZE(default_content_type) + 1);
+    memcpy(type_str, default_content_type, ARR_SIZE(default_content_type));
+    type_str[ARR_SIZE(default_content_type)] = 0;
+    res->headers.headers[RES_HEADER_CONTENT_TYPE] = type_str;
+}
+
 struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req) {
     http_status_code req_line_status = parse_req_line(in_buf, buf_size, req);
+    struct http_res out = create_http_res();
 
     if (req_line_status) {
-        struct http_res out = {
-            .status = req_line_status
-        };
+        set_http_status(&out, req_line_status);
 
         return out;
     }
@@ -272,16 +340,12 @@ struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct htt
     http_status_code field_lines_status = parse_field_lines(in_buf, buf_size, req);
 
     if (field_lines_status) {
-        struct http_res out = {
-            .status = field_lines_status
-        };
+        set_http_status(&out, field_lines_status);
 
         return out;
     }
 
-    struct http_res out = {
-        .status = HTTP_OK
-    };
+    set_http_status(&out, HTTP_OK);
 
     return out;
 }
@@ -307,5 +371,23 @@ void send_http_res(struct http_res * res, int out_sock_fd) {
     status_to_str(res->status, status);
 
     write(out_sock_fd, status, 3);
-    write(out_sock_fd, " \r\n\r\n", 5);
+    write(out_sock_fd, " \r\n", 3);
+
+    for (size_t i = 0; i < RES_HEADER_MAX; i++) {
+        if (res->headers.headers[i]) {
+            int name_len = strlen(res_header_names[i]);
+            int val_len = strlen(res->headers.headers[i]);
+
+            write(out_sock_fd, res_header_names[i], name_len);
+            write(out_sock_fd, ": ", 2);
+            write(out_sock_fd, res->headers.headers[i], val_len);
+            write(out_sock_fd, "\r\n", 2);
+        }
+    }
+
+    write(out_sock_fd, "\r\n", 2);
+
+    if (res->content) {
+        write(out_sock_fd, res->content, strlen(res->content));
+    }
 }

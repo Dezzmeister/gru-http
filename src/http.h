@@ -27,13 +27,22 @@
 #define REQ_HEADER_HOST             4
 #define REQ_HEADER_MAX              5
 
+#define RES_HEADER_CONTENT_LENGTH   0
+#define RES_HEADER_CONTENT_TYPE     1
+#define RES_HEADER_MAX              2
+
 #define ARR_SIZE(arr)           ((sizeof (arr)) / sizeof ((arr)[0]))
 
 extern const char * req_header_names[REQ_HEADER_MAX];
+extern const char * res_header_names[RES_HEADER_MAX];
 
 struct req_headers {
     char * known[REQ_HEADER_MAX];
     // TODO: Custom headers
+};
+
+struct res_headers {
+    char * headers[RES_HEADER_MAX];
 };
 
 enum http_method {
@@ -61,8 +70,12 @@ struct http_req create_http_req();
 void free_http_req(struct http_req * req);
 
 struct http_res {
+    struct res_headers headers;
+    char * content;
     http_status_code status;
 };
+struct http_res create_http_res();
+void free_http_res(struct http_res * res);
 
 struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req);
 void send_http_res(struct http_res * res, int out_sock_fd);

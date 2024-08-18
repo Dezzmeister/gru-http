@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "error.h"
+#include "files.h"
 #include "net.h"
 
 const char * argp_program_version = "gru-http 1.0";
@@ -33,10 +34,16 @@ static const char doc[] =
 "\v"
 "The first argument is an IPv4 address, formatted as 4 decimal octets separated "
 "by periods. The second argument is a TCP port (in the range [1, 65535]). The "
-"server will bind to the given IP address and listen on the given port.";
+"server will bind to the given IP address and listen on the given port. "
+"The last argument is a directory containing an index.html file (and other "
+"necessary files). The server will treat this as the root directory, "
+"so that a resource named in a GET request will correspond to a file in this "
+"directory. The server will respond with index.html to a GET request for the root "
+"directory.";
 
 static char * ip_str;
 static char * port_str;
+static char * static_dir;
 
 static error_t arg_parser(int key, char * arg, struct argp_state * state) {
     static int arg_index = 0;
@@ -52,6 +59,10 @@ static error_t arg_parser(int key, char * arg, struct argp_state * state) {
                     port_str = arg;
                     break;
                 }
+                case 2: {
+                    static_dir = arg;
+                    break;
+                }
                 default: {
                     argp_usage(state);
                     break;
@@ -61,7 +72,7 @@ static error_t arg_parser(int key, char * arg, struct argp_state * state) {
             return 0;
         }
         case ARGP_KEY_END: {
-            if (arg_index < 2) {
+            if (arg_index < 3) {
                 argp_usage(state);
             }
             break;
@@ -77,7 +88,7 @@ int main(int argc, char ** const argv) {
     struct argp parser = {
         .options = NULL,
         .parser = arg_parser,
-        .args_doc = "IPV4 PORT",
+        .args_doc = "IPV4 PORT DIR",
         .doc = doc,
         .children = NULL,
         .help_filter = NULL,
@@ -111,6 +122,9 @@ int main(int argc, char ** const argv) {
         printf("IP address is not valid\n");
         exit(1);
     }
+
+    printf("Loading static files from %s\n", static_dir);
+    load_static_dir(static_dir);
 
     listen_for_connections(&my_addr);
 

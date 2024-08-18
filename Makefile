@@ -13,7 +13,8 @@ HEADERS = \
 		${INC_DIR}/net.h \
 		${INC_DIR}/http.h \
 		${INC_DIR}/status.h \
-		${INC_DIR}/error.h
+		${INC_DIR}/error.h \
+		${INC_DIR}/files.h
 
 OBJS = \
 		${SRC_DIR}/main.o  \
@@ -21,7 +22,8 @@ OBJS = \
 		${SRC_DIR}/http.o  \
 		${SRC_DIR}/status.o  \
 		${SRC_DIR}/net.c \
-		${SRC_DIR}/error.c
+		${SRC_DIR}/error.c \
+		${SRC_DIR}/files.c
 
 OBJS_NO_MAIN = $(filter-out ${SRC_DIR}/main.o, ${OBJS})
 
