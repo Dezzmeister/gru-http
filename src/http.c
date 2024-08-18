@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "files.h"
 #include "http.h"
 
 const char * req_header_names[REQ_HEADER_MAX] = {
@@ -291,10 +292,6 @@ struct http_res create_http_res() {
 }
 
 void free_http_res(struct http_res * res) {
-    if (res->content) {
-        free(res->content);
-    }
-
     for (size_t i = 0; i < RES_HEADER_MAX; i++) {
         if (res->headers.headers[i]) {
             free(res->headers.headers[i]);
@@ -312,8 +309,7 @@ static void set_http_status(struct http_res * res, http_status_code status) {
     // We'll try to send a default message in the response body
     int len = strlen(http_status_names[status]);
 
-    res->content = malloc(len + 1);
-    memcpy(res->content, http_status_names[status], len + 1);
+    res->content = http_status_names[status];
 
     size_t buf_size = sizeof(long) * 8 + 1;
     char * len_str = malloc(buf_size);
@@ -325,6 +321,73 @@ static void set_http_status(struct http_res * res, http_status_code status) {
     memcpy(type_str, default_content_type, ARR_SIZE(default_content_type));
     type_str[ARR_SIZE(default_content_type)] = 0;
     res->headers.headers[RES_HEADER_CONTENT_TYPE] = type_str;
+}
+
+static char * get_content_type(char * filename) {
+    size_t end = strlen(filename);
+    size_t start = end;
+
+    while (start != 0 && filename[start] != '.' && filename[start] != '/') {
+        start--;
+    }
+
+    const char * content_type = NULL;
+
+    if (filename[start] == '/' || start == end) {
+        content_type = "application/octet-stream";
+    } else {
+        start++;
+
+        if (! strcmp(filename + start, "html")) {
+            content_type = "text/html";
+        } else if (! strcmp(filename + start, "txt")) {
+            content_type = "text/plain";
+        } else {
+            content_type = "application/octet-stream";
+        }
+    }
+
+    size_t len = strlen(content_type);
+    char * out = malloc(len + 1);
+
+    memcpy(out, content_type, len + 1);
+
+    return out;
+}
+
+static http_status_code try_get_resource(struct http_res * res, struct http_req * req) {
+    struct file * resource = static_files.files;
+    int is_index_query = ! strcmp(req->target, "/");
+
+    while (resource) {
+        if (is_index_query && ! strcmp("/index.html", resource->path)) {
+            break;
+        }
+
+        if (! strcmp(resource->path, req->target)) {
+            break;
+        }
+
+        resource = resource->next;
+    }
+
+    if (! resource) {
+        return HTTP_RESOURCE_NOT_FOUND;
+    }
+
+    size_t len_str_size = sizeof(long) * 8 + 1;
+    char * len_str = malloc(len_str_size);
+    snprintf(len_str, len_str_size, "%ld", resource->content_length);
+    res->headers.headers[RES_HEADER_CONTENT_LENGTH] = len_str;
+    res->headers.headers[RES_HEADER_CONTENT_TYPE] = get_content_type(resource->path);
+
+    if (req->method == Head) {
+        return 0;
+    }
+
+    res->content = resource->content;
+
+    return 0;
 }
 
 struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req) {
@@ -341,6 +404,14 @@ struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct htt
 
     if (field_lines_status) {
         set_http_status(&out, field_lines_status);
+
+        return out;
+    }
+
+    http_status_code get_resource_status = try_get_resource(&out, req);
+
+    if (get_resource_status) {
+        set_http_status(&out, get_resource_status);
 
         return out;
     }

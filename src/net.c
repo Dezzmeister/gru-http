@@ -88,6 +88,7 @@ static void * start_connection(void * thread_index) {
     free_http_req(&req);
 
     printf("[Thread %d] Closing socket\n", tid_for_printing);
+    shutdown(thread->peer_fd, SHUT_WR);
     int status = close(thread->peer_fd);
 
     if (status == -1) {

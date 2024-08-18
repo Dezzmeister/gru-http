@@ -21,6 +21,7 @@
 struct file {
     char path[256];
     char * content;
+    size_t content_length;
     struct file * next;
 };
 

@@ -100,6 +100,8 @@ struct file * read_full_file(const char * path, size_t root_offset) {
             printf("Error reading from %s\n", path);
             die();
         }
+
+        pos += status;
     }
 
     status = close(fd);
@@ -112,6 +114,7 @@ struct file * read_full_file(const char * path, size_t root_offset) {
     struct file * out = malloc(sizeof(struct file));
 
     out->content = bytes;
+    out->content_length = statbuf.st_size;
     out->next = NULL;
     memcpy(out->path, path + root_offset, strlen(path) + 1 - root_offset);
 

@@ -71,7 +71,7 @@ void free_http_req(struct http_req * req);
 
 struct http_res {
     struct res_headers headers;
-    char * content;
+    const char * content;
     http_status_code status;
 };
 struct http_res create_http_res();
