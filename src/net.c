@@ -18,7 +18,6 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <netdb.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <unistd.h>
 #include "error.h"
@@ -51,7 +50,7 @@ static void print_http_res(struct http_res * res, pid_t tid) {
 }
 
 static int start_connection_impl(struct connection_thread * thread) {
-    int peer_fd = atomic_load_explicit(&thread->peer_fd, memory_order_acquire);
+    int peer_fd = thread->peer_fd;
     char buf[RECV_BUF_SIZE];
     int bytes_read;
 
@@ -87,8 +86,14 @@ static int start_connection_impl(struct connection_thread * thread) {
     free_http_req(&req);
 
     printf("[Thread %d] Closing socket\n", tid_for_printing);
-    shutdown(peer_fd, SHUT_WR);
-    int status = close(peer_fd);
+    // TODO: Fix sockets ending up in TIME_WAIT
+    int status = shutdown(peer_fd, SHUT_RDWR);
+
+    if (status == -1) {
+        perror("Failed to call 'shutdown' on socket");
+    }
+
+    status = close(peer_fd);
 
     if (status == -1) {
         snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to close socket", tid_for_printing);
@@ -100,20 +105,13 @@ static int start_connection_impl(struct connection_thread * thread) {
     return 0;
 }
 
-static void connection_handler_cleanup(void * arg) {
-    struct connection_thread * thread = arg;
-
-    atomic_store_explicit(&thread->active, 0, memory_order_release);
-}
-
 static void * start_connection(void * thread_index) {
     const size_t thread_i = (size_t) thread_index;
     struct connection_thread * thread = threads + thread_i;
-    int status;
 
-    pthread_cleanup_push(connection_handler_cleanup, thread);
-    status = start_connection_impl(thread);
-    pthread_cleanup_pop(1);
+    int status = start_connection_impl(thread);
+
+    thread->active = 0;
 
     return (void *) (uint64_t) status;
 }
@@ -129,6 +127,15 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
 
     if (sock_fd == -1) {
         die();
+    }
+
+    endprotoent();
+
+    const int reuse = 1;
+    int result = setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof reuse);
+
+    if (result) {
+        perror("Failed to set SO_REUSEADDR on listen socket");
     }
 
     int status = bind(sock_fd, (const struct sockaddr *) my_addr, sizeof (struct sockaddr_in));
@@ -167,7 +174,13 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
 
         while (1) {
             for (size_t i = 0; i < MAX_THREADS; i++) {
-                if (! atomic_load_explicit(&threads[i].active, memory_order_acquire)) {
+                if (! threads[i].active) {
+                    int status = pthread_join(threads[i].thread, NULL);
+
+                    if (status == -1) {
+                        perror("Error joining connection thread");
+                    }
+
                     thread_i = i;
                     goto thread_i_found;
                 }
@@ -177,10 +190,14 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
             sleep(1);
         }
         thread_i_found:
-        atomic_store_explicit(&threads[thread_i].peer_fd, peer_sock_fd, memory_order_release);
-        atomic_store_explicit(&threads[thread_i].active, 1, memory_order_release);
+        threads[thread_i].peer_fd = peer_sock_fd;
+        threads[thread_i].active = 1;
 
-        pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
+        int status = pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
+
+        if (status == -1) {
+            perror("Failed to start thread:");
+        }
     }
 
     printf("Shutting down...\n");

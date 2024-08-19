@@ -48,7 +48,13 @@ const char * http_method_names[] = {
 };
 static const size_t http_method_max = ARR_SIZE(http_method_names);
 
-static const char http_version[] = "HTTP/1.1";
+// We (loosely) support 1.0 and 1.1
+static const char * http_versions[] = {
+    "HTTP/1.0",
+    "HTTP/1.1"
+};
+
+static const char http_version_out[] = "HTTP/1.1";
 
 // Parses an HTTP request line into an `http_req` object and returns either a status code or
 // zero. If a status code is returned, then that should be sent back to the client immediately.
@@ -96,11 +102,18 @@ static http_status_code parse_req_line(const char * restrict in_buf, size_t buf_
 
     // At this point we can just compare the remaining few characters to the expected HTTP
     // version string and fail if they don't match
-    if (strncmp(in_buf + req->seek, http_version, ARR_SIZE(http_version) - 1)) {
-        return HTTP_VERSION_NOT_SUPPORTED;
+    for (size_t i = 0; i < ARR_SIZE(http_versions); i++) {
+        size_t version_len = strlen(http_versions[i]);
+
+        if (! strncmp(in_buf + req->seek, http_versions[i], version_len)) {
+            req->seek += version_len;
+            goto version_found;
+        }
     }
 
-    req->seek += ARR_SIZE(http_version) - 1;
+    return HTTP_VERSION_NOT_SUPPORTED;
+
+version_found:
 
     if (req->seek >= (buf_size - 2)) {
         return HTTP_URI_TOO_LONG;
@@ -310,6 +323,7 @@ static void set_http_status(struct http_res * res, http_status_code status) {
     int len = strlen(http_status_names[status]);
 
     res->content = http_status_names[status];
+    res->content_length = len;
 
     size_t buf_size = sizeof(long) * 8 + 1;
     char * len_str = malloc(buf_size);
@@ -386,6 +400,7 @@ static http_status_code try_get_resource(struct http_res * res, struct http_req 
     }
 
     res->content = resource->content;
+    res->content_length = resource->content_length;
 
     return 0;
 }
@@ -435,7 +450,7 @@ static void status_to_str(http_status_code status, char out[4]) {
 void send_http_res(struct http_res * res, int out_sock_fd) {
     // TODO: Buffered write
 
-    write(out_sock_fd, http_version, ARR_SIZE(http_version) - 1);
+    write(out_sock_fd, http_version_out, ARR_SIZE(http_version_out) - 1);
     write(out_sock_fd, " ", 1);
 
     char status[4];
@@ -459,6 +474,6 @@ void send_http_res(struct http_res * res, int out_sock_fd) {
     write(out_sock_fd, "\r\n", 2);
 
     if (res->content) {
-        write(out_sock_fd, res->content, strlen(res->content));
+        write(out_sock_fd, res->content, res->content_length);
     }
 }

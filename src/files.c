@@ -122,8 +122,8 @@ struct file * read_full_file(const char * path, size_t root_offset) {
 }
 
 static struct file * read_full_dir(char * root_dir_name) {
-    struct dir_stack * top_dir = malloc(sizeof(struct dir_stack));
-    struct dir_stack * last_dir = top_dir;
+    struct dir_stack * last_dir = malloc(sizeof(struct dir_stack));
+    struct dir_stack * top_dir = last_dir;
 
     last_dir->next = NULL;
     last_dir->path_len = strlen(root_dir_name);
@@ -133,9 +133,9 @@ static struct file * read_full_dir(char * root_dir_name) {
         exit(1);
     }
 
-    memcpy(last_dir->path, root_dir_name, last_dir->path_len);
+    memcpy(last_dir->path, root_dir_name, last_dir->path_len + 1);
 
-    if (last_dir->path[last_dir->path_len] == '/') {
+    if (last_dir->path[last_dir->path_len - 1] == '/') {
         last_dir->path_len--;
     }
 
