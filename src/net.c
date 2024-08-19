@@ -44,7 +44,7 @@ static void print_http_req(struct http_req * req, pid_t tid) {
     if (req->target) {
         printf("[Thread %d] -> %s %s\n", tid, http_method_names[req->method], req->target);
 
-        for (int i = 0; i < REQ_HEADER_MAX; i++) {
+        for (size_t i = 0; i < REQ_HEADER_MAX; i++) {
             if (req->headers.known[i]) {
                 printf("\t\t %s: %s\n", req_header_names[i], req->headers.known[i]);
             }
@@ -56,6 +56,12 @@ static void print_http_req(struct http_req * req, pid_t tid) {
 
 static void print_http_res(struct http_res * res, pid_t tid) {
     printf("[Thread %d] <- %d %s\n", tid, res->status, http_status_names[res->status]);
+
+    for (size_t i = 0; i < RES_HEADER_MAX; i++) {
+        if (res->headers.headers[i]) {
+            printf("\t\t %s: %s\n", res_header_names[i], res->headers.headers[i]);
+        }
+    }
 }
 #endif
 
