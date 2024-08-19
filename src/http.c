@@ -18,9 +18,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #include "files.h"
 #include "http.h"
+
+#define write_sock(...)     { \
+    int result = send(__VA_ARGS__, MSG_NOSIGNAL); \
+    if (result == -1) { \
+        perror("Failed to write to socket"); \
+        return; \
+    } \
+} noop()
+
+static void noop() {}
 
 const char * req_header_names[REQ_HEADER_MAX] = {
     [REQ_HEADER_ACCEPT] = "Accept",
@@ -450,30 +461,30 @@ static void status_to_str(http_status_code status, char out[4]) {
 void send_http_res(struct http_res * res, int out_sock_fd) {
     // TODO: Buffered write
 
-    write(out_sock_fd, http_version_out, ARR_SIZE(http_version_out) - 1);
-    write(out_sock_fd, " ", 1);
+    write_sock(out_sock_fd, http_version_out, ARR_SIZE(http_version_out) - 1);
+    write_sock(out_sock_fd, " ", 1);
 
     char status[4];
     status_to_str(res->status, status);
 
-    write(out_sock_fd, status, 3);
-    write(out_sock_fd, " \r\n", 3);
+    write_sock(out_sock_fd, status, 3);
+    write_sock(out_sock_fd, " \r\n", 3);
 
     for (size_t i = 0; i < RES_HEADER_MAX; i++) {
         if (res->headers.headers[i]) {
             int name_len = strlen(res_header_names[i]);
             int val_len = strlen(res->headers.headers[i]);
 
-            write(out_sock_fd, res_header_names[i], name_len);
-            write(out_sock_fd, ": ", 2);
-            write(out_sock_fd, res->headers.headers[i], val_len);
-            write(out_sock_fd, "\r\n", 2);
+            write_sock(out_sock_fd, res_header_names[i], name_len);
+            write_sock(out_sock_fd, ": ", 2);
+            write_sock(out_sock_fd, res->headers.headers[i], val_len);
+            write_sock(out_sock_fd, "\r\n", 2);
         }
     }
 
-    write(out_sock_fd, "\r\n", 2);
+    write_sock(out_sock_fd, "\r\n", 2);
 
     if (res->content) {
-        write(out_sock_fd, res->content, res->content_length);
+        write_sock(out_sock_fd, res->content, res->content_length);
     }
 }

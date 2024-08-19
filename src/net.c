@@ -34,8 +34,15 @@
 #include "status.h"
 #endif
 
+#define MAX_THREADS     32
 #define RECV_BUF_SIZE   8192
 #define PRINT_BUF_SIZE  512
+
+struct connection_thread {
+    pthread_t thread;
+    _Atomic int peer_fd;
+    _Atomic int active;
+};
 
 struct connection_thread threads[MAX_THREADS] = { 0 };
 
