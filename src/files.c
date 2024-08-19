@@ -227,7 +227,13 @@ static struct file * read_full_dir(char * root_dir_name) {
 
         struct dirent * ent;
 
-        while ((ent = readdir(dir)) && strcmp(ent->d_name, ".") && strcmp(ent->d_name, "..")) {
+        while ((ent = readdir(dir))) {
+            int is_relative_dir = strcmp(ent->d_name, ".") || strcmp(ent->d_name, "..");
+
+            if (is_relative_dir) {
+                continue;
+            }
+
             struct stat statbuf;
             int status = fstatat(dir_fd, ent->d_name, &statbuf, 0);
 
