@@ -228,9 +228,9 @@ static struct file * read_full_dir(char * root_dir_name) {
         struct dirent * ent;
 
         while ((ent = readdir(dir))) {
-            int is_relative_dir = strcmp(ent->d_name, ".") || strcmp(ent->d_name, "..");
+            int is_dot_dir = !(strcmp(ent->d_name, ".") && strcmp(ent->d_name, ".."));
 
-            if (is_relative_dir) {
+            if (is_dot_dir) {
                 continue;
             }
 
