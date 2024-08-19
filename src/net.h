@@ -20,16 +20,17 @@
 
 #include <arpa/inet.h>
 #include <pthread.h>
-#include <signal.h>
 
 #define MAX_THREADS     32
 
 struct connection_thread {
     pthread_t thread;
     _Atomic int peer_fd;
-    volatile sig_atomic_t active;
+    _Atomic int active;
 };
 
 void listen_for_connections(const struct sockaddr_in * my_addr);
+void cancel_all_threads();
+void join_finished_threads();
 
 #endif

@@ -15,6 +15,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+
+// Uncomment this to suppress stdout for each request
+// #define SUPPRESS_REQ_LOGS
+
 #define _GNU_SOURCE
 #include <errno.h>
 #include <netdb.h>
@@ -24,13 +29,17 @@
 #include "http.h"
 #include "ip.h"
 #include "net.h"
+
+#ifndef SUPPRESS_REQ_LOGS
 #include "status.h"
+#endif
 
 #define RECV_BUF_SIZE   8192
 #define PRINT_BUF_SIZE  512
 
-struct connection_thread threads[MAX_THREADS] = {};
+struct connection_thread threads[MAX_THREADS] = { 0 };
 
+#ifndef SUPPRESS_REQ_LOGS
 static void print_http_req(struct http_req * req, pid_t tid) {
     if (req->target) {
         printf("[Thread %d] -> %s %s\n", tid, http_method_names[req->method], req->target);
@@ -48,6 +57,7 @@ static void print_http_req(struct http_req * req, pid_t tid) {
 static void print_http_res(struct http_res * res, pid_t tid) {
     printf("[Thread %d] <- %d %s\n", tid, res->status, http_status_names[res->status]);
 }
+#endif
 
 static int start_connection_impl(struct connection_thread * thread) {
     int peer_fd = thread->peer_fd;
@@ -58,7 +68,9 @@ static int start_connection_impl(struct connection_thread * thread) {
     print_buf[PRINT_BUF_SIZE - 1] = 0;
     pid_t tid_for_printing = gettid();
 
+#ifndef SUPPRESS_REQ_LOGS
     printf("[Thread %d] Receiving data\n", tid_for_printing);
+#endif
 
     struct http_req req = create_http_req();
     // TODO: Non-blocking IO so we can disconnect clients that are too slow
@@ -74,9 +86,13 @@ static int start_connection_impl(struct connection_thread * thread) {
 #endif
 
             struct http_res res = handle_http_req(buf, bytes_read, &req);
+#ifndef SUPPRESS_REQ_LOGS
             print_http_req(&req, tid_for_printing);
+#endif
             send_http_res(&res, peer_fd);
+#ifndef SUPPRESS_REQ_LOGS
             print_http_res(&res, tid_for_printing);
+#endif
             free_http_res(&res);
             // Keep-Alive is not supported
             break;
@@ -85,7 +101,9 @@ static int start_connection_impl(struct connection_thread * thread) {
 
     free_http_req(&req);
 
+#ifndef SUPPRESS_REQ_LOGS
     printf("[Thread %d] Closing socket\n", tid_for_printing);
+#endif
     // TODO: Fix sockets ending up in TIME_WAIT
     int status = shutdown(peer_fd, SHUT_RDWR);
 
@@ -116,6 +134,32 @@ static void * start_connection(void * thread_index) {
     return (void *) (uint64_t) status;
 }
 
+void cancel_all_threads() {
+    for (size_t i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].active) {
+            int status = pthread_cancel(threads[i].thread);
+
+            if (status == -1) {
+                perror("Failed to cancel thread");
+            }
+        }
+    }
+}
+
+void join_finished_threads() {
+    for (size_t i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].thread) {
+            int status = pthread_join(threads[i].thread, NULL);
+
+            if (status == -1) {
+                perror("Failed to join thread");
+            }
+
+            threads[i].thread = 0;
+        }
+    }
+}
+
 void listen_for_connections(const struct sockaddr_in * my_addr) {
     struct protoent * ent = getprotobyname("tcp");
 
@@ -144,7 +188,7 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
         die();
     }
 
-    status = listen(sock_fd, 1);
+    status = listen(sock_fd, 32);
 
     if (status == -1) {
         die();
@@ -161,6 +205,7 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
     socklen_t peer_len = sizeof peer_sock;
 
     while ((peer_sock_fd = accept(sock_fd, (struct sockaddr *) &peer_sock, &peer_len)) != -1) {
+#ifndef SUPPRESS_REQ_LOGS
         char * const ip_str = fmt_ipv4_addr(peer_sock.sin_addr);
 
         if (ip_str) {
@@ -169,18 +214,15 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
         } else {
             printf("IP string was null\n");
         }
+#endif
 
         size_t thread_i;
 
         while (1) {
+            join_finished_threads();
+
             for (size_t i = 0; i < MAX_THREADS; i++) {
                 if (! threads[i].active) {
-                    int status = pthread_join(threads[i].thread, NULL);
-
-                    if (status == -1) {
-                        perror("Error joining connection thread");
-                    }
-
                     thread_i = i;
                     goto thread_i_found;
                 }

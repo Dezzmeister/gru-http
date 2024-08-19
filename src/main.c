@@ -15,13 +15,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 // Uncomment this to print raw request data
 // #define DEBUG_PRINT_RAW_REQ
-
 #include <argp.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 #include "error.h"
 #include "files.h"
 #include "net.h"
@@ -84,6 +85,15 @@ static error_t arg_parser(int key, char * arg, struct argp_state * state) {
     return 0;
 }
 
+static struct sigaction sigint_action;
+
+static void sigint_handler(int sig) {
+    printf("Received SIGINT\n");
+    cancel_all_threads();
+    join_finished_threads();
+    free_static_dir();
+}
+
 int main(int argc, char ** const argv) {
     struct argp parser = {
         .options = NULL,
@@ -98,6 +108,16 @@ int main(int argc, char ** const argv) {
     error_t argp_result = argp_parse(&parser, argc, argv, 0, NULL, NULL);
 
     if (argp_result) {
+        die();
+    }
+
+    sigint_action.sa_handler = sigint_handler;
+    sigint_action.sa_flags = 0;
+    sigaddset(&sigint_action.sa_mask, SIGINT);
+
+    int sigaction_result = sigaction(SIGINT, &sigint_action, NULL);
+
+    if (sigaction_result == -1) {
         die();
     }
 

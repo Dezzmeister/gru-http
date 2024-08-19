@@ -33,3 +33,4 @@ struct http_static_dir {
 extern struct http_static_dir static_files;
 
 void load_static_dir(const char * dir);
+void free_static_dir();

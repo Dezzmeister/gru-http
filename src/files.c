@@ -236,3 +236,17 @@ void load_static_dir(const char * dir) {
 
     static_files = out;
 }
+
+void free_static_dir() {
+    free(static_files.root);
+
+    struct file * curr_file = static_files.files;
+
+    while (curr_file) {
+        struct file * next = curr_file->next;
+
+        free(curr_file->content);
+        free(curr_file);
+        curr_file = next;
+    }
+}
