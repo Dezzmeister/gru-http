@@ -21,17 +21,30 @@
 #include "status.h"
 
 #define REQ_HEADER_ACCEPT           0
-#define REQ_HEADER_CONTENT_TYPE     1
-#define REQ_HEADER_CONTENT_LENGTH   2
-#define REQ_HEADER_USER_AGENT       3
+#define REQ_HEADER_CACHE_CONTROL    1
+#define REQ_HEADER_CONTENT_TYPE     2
+#define REQ_HEADER_CONTENT_LENGTH   3
 #define REQ_HEADER_HOST             4
-#define REQ_HEADER_MAX              5
+#define REQ_HEADER_USER_AGENT       5
+#define REQ_HEADER_MAX              6
 
 #define RES_HEADER_CONTENT_LENGTH   0
 #define RES_HEADER_CONTENT_TYPE     1
 #define RES_HEADER_MAX              2
 
 #define ARR_SIZE(arr)           ((sizeof (arr)) / sizeof ((arr)[0]))
+
+enum response_cache_option {
+    NeverUseCache,
+    DefaultUseCache,
+    AlwaysUseCache
+};
+
+struct server_options {
+    enum response_cache_option cache_option;
+};
+
+extern struct server_options global_options;
 
 extern const char * req_header_names[REQ_HEADER_MAX];
 extern const char * res_header_names[RES_HEADER_MAX];

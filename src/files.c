@@ -76,6 +76,67 @@ static size_t path_join(char * restrict first, char * restrict second, size_t fi
     return out_len;
 }
 
+int reload_static_file(struct file * file_entry) {
+    char msg_buf[PATH_MAX * 2];
+    char path_buf[PATH_MAX];
+    size_t root_len = strlen(static_files.root);
+
+    memcpy(path_buf, static_files.root, root_len + 1);
+    path_join(path_buf, file_entry->path, root_len);
+
+    int fd = open(path_buf, O_RDONLY);
+
+    if (fd == -1) {
+        snprintf(msg_buf, PATH_MAX * 2, "Failed to open %s", path_buf);
+        perror(msg_buf);
+
+        return -1;
+    }
+
+    struct stat statbuf;
+
+    int status = fstat(fd, &statbuf);
+
+    if (status == -1) {
+        snprintf(msg_buf, PATH_MAX * 2, "Failed to stat %s", path_buf);
+        perror(msg_buf);
+
+        return -1;
+    }
+
+    char * bytes = malloc(statbuf.st_size);
+    size_t pos = 0;
+    size_t bytes_read;
+
+    while ((bytes_read = read(fd, bytes + pos, statbuf.st_size - pos))) {
+        if (bytes_read == -1) {
+            free(bytes);
+            snprintf(msg_buf, PATH_MAX * 2, "Failed to read from %s", path_buf);
+            perror(msg_buf);
+
+            return -1;
+        }
+
+        pos += bytes_read;
+    }
+
+    int close_status = close(fd);
+
+    if (close_status == -1) {
+        free(bytes);
+        snprintf(msg_buf, PATH_MAX * 2, "Failed to close %s", path_buf);
+        perror(msg_buf);
+
+        return -1;
+    }
+
+    free(file_entry->content);
+    file_entry->content = bytes;
+    file_entry->content_length = statbuf.st_size;
+
+    return 0;
+}
+
 struct file * read_full_file(const char * path, size_t root_offset) {
     int fd = open(path, O_RDONLY);
 
@@ -225,16 +286,11 @@ static struct file * read_full_dir(char * root_dir_name) {
 void load_static_dir(const char * dir) {
     size_t dir_len = strlen(dir);
 
-    struct http_static_dir out = {
-        .root = malloc(dir_len + 1),
-        .files = NULL
-    };
+    static_files.root = malloc(dir_len + 1);
+    static_files.files = NULL;
 
-    memcpy(out.root, dir, dir_len + 1);
-
-    out.files = read_full_dir(out.root);
-
-    static_files = out;
+    memcpy(static_files.root, dir, dir_len + 1);
+    static_files.files = read_full_dir(static_files.root);
 }
 
 void free_static_dir() {

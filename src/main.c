@@ -23,8 +23,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
+#include <string.h>
 #include "error.h"
 #include "files.h"
+#include "http.h"
 #include "net.h"
 
 const char * argp_program_version = "gru-http 1.0";
@@ -41,6 +43,24 @@ static const char doc[] =
 "so that a resource named in a GET request will correspond to a file in this "
 "directory. The server will respond with index.html to a GET request for the root "
 "directory.";
+static struct argp_option argp_options[] = {
+    {
+        .name = "cache",
+        .key = 'c',
+        .arg = "never|always",
+        .flags = 0,
+        .doc = "Overrides default caching behavior for responses. Pass \"never\" "
+            "to force the server to load the requested resource from the filesystem "
+            "on every request. Pass \"always\" to force the server to ignore "
+            "\"Cache-Control: no-cache\" and return cached resources on every "
+            "request. The default behavior is for the server to return a cached "
+            "resource, unless the \"Cache-Control\" header is present and specifies "
+            "\"no-cache\".",
+        .group = 0
+
+    },
+    { 0 }
+};
 
 static char * ip_str;
 static char * port_str;
@@ -78,6 +98,18 @@ static error_t arg_parser(int key, char * arg, struct argp_state * state) {
             }
             break;
         }
+        case 'c': {
+            if (! strcmp(arg, "never")) {
+                global_options.cache_option = NeverUseCache;
+            } else if (! strcmp(arg, "always")) {
+                global_options.cache_option = AlwaysUseCache;
+            } else {
+                printf("Invalid --cache option\n");
+                argp_usage(state);
+            }
+
+            break;
+        }
         default:
             return ARGP_ERR_UNKNOWN;
     }
@@ -96,7 +128,7 @@ static void sigint_handler(int sig) {
 
 int main(int argc, char ** const argv) {
     struct argp parser = {
-        .options = NULL,
+        .options = argp_options,
         .parser = arg_parser,
         .args_doc = "IPV4 PORT DIR",
         .doc = doc,
@@ -110,6 +142,18 @@ int main(int argc, char ** const argv) {
     if (argp_result) {
         die();
     }
+
+    switch (global_options.cache_option) {
+        case NeverUseCache: {
+            printf("Caching is disabled\n");
+            break;
+        }
+        case AlwaysUseCache: {
+            printf("Caching is forced\n");
+            break;
+        }
+        case DefaultUseCache: {}
+    };
 
     sigint_action.sa_handler = sigint_handler;
     sigint_action.sa_flags = 0;

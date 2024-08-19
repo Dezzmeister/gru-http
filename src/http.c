@@ -33,12 +33,17 @@
 
 static void noop() {}
 
+struct server_options global_options = {
+    .cache_option = DefaultUseCache
+};
+
 const char * req_header_names[REQ_HEADER_MAX] = {
     [REQ_HEADER_ACCEPT] = "Accept",
+    [REQ_HEADER_CACHE_CONTROL] = "Cache-Control",
     [REQ_HEADER_CONTENT_TYPE] = "Content-Type",
     [REQ_HEADER_CONTENT_LENGTH] = "Content-Length",
-    [REQ_HEADER_USER_AGENT] = "User-Agent",
-    [REQ_HEADER_HOST] = "Host"
+    [REQ_HEADER_HOST] = "Host",
+    [REQ_HEADER_USER_AGENT] = "User-Agent"
 };
 
 const char * res_header_names[RES_HEADER_MAX] = {
@@ -348,6 +353,28 @@ static void set_http_status(struct http_res * res, http_status_code status) {
     res->headers.headers[RES_HEADER_CONTENT_TYPE] = type_str;
 }
 
+static int strcmp_ignore_case(const char * a, const char * b) {
+    int len_a = strlen(a);
+    int len_b = strlen(b);
+
+    if (len_a < len_b) {
+        return -b[len_a];
+    } else if (len_a > len_b) {
+        return a[len_b];
+    }
+
+    size_t i = 0;
+    while (i < len_a) {
+        if (lowercase(a[i]) != lowercase(b[i])) {
+            return a[i] - b[i];
+        }
+
+        i++;
+    }
+
+    return 0;
+}
+
 static char * get_content_type(char * filename) {
     size_t end = strlen(filename);
     size_t start = end;
@@ -363,10 +390,20 @@ static char * get_content_type(char * filename) {
     } else {
         start++;
 
-        if (! strcmp(filename + start, "html")) {
+        if (! strcmp_ignore_case(filename + start, "html")) {
             content_type = "text/html";
-        } else if (! strcmp(filename + start, "txt")) {
+        } else if (! strcmp_ignore_case(filename + start, "js")) {
+            content_type = "text/javascript";
+        } else if (! strcmp_ignore_case(filename + start, "css")) {
+            content_type = "text/css";
+        } else if (! strcmp_ignore_case(filename + start, "txt")) {
             content_type = "text/plain";
+        } else if (! strcmp_ignore_case(filename + start, "png")) {
+            content_type = "image/png";
+        } else if (! strcmp_ignore_case(filename + start, "jpg")) {
+            content_type = "image/jpeg";
+        } else if (! strcmp_ignore_case(filename + start, "jpeg")) {
+            content_type = "image/jpeg";
         } else {
             content_type = "application/octet-stream";
         }
@@ -398,6 +435,13 @@ static http_status_code try_get_resource(struct http_res * res, struct http_req 
 
     if (! resource) {
         return HTTP_RESOURCE_NOT_FOUND;
+    }
+
+    int never_use_cache = global_options.cache_option == NeverUseCache;
+    int must_use_cache = global_options.cache_option == AlwaysUseCache;
+
+    if (never_use_cache || (! must_use_cache && ! strcmp(req->headers.known[REQ_HEADER_CACHE_CONTROL], "no-cache"))) {
+        reload_static_file(resource);
     }
 
     size_t len_str_size = sizeof(long) * 8 + 1;
