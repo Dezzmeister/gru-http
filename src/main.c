@@ -22,7 +22,6 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
 #include <string.h>
 #include "error.h"
 #include "files.h"
@@ -117,15 +116,6 @@ static error_t arg_parser(int key, char * arg, struct argp_state * state) {
     return 0;
 }
 
-static struct sigaction sigint_action;
-
-static void sigint_handler(int sig) {
-    printf("Received SIGINT\n");
-    cancel_all_threads();
-    join_finished_threads();
-    free_static_dir();
-}
-
 int main(int argc, char ** const argv) {
     struct argp parser = {
         .options = argp_options,
@@ -155,16 +145,6 @@ int main(int argc, char ** const argv) {
         case DefaultUseCache: {}
     };
 
-    sigint_action.sa_handler = sigint_handler;
-    sigint_action.sa_flags = 0;
-    sigaddset(&sigint_action.sa_mask, SIGINT);
-
-    int sigaction_result = sigaction(SIGINT, &sigint_action, NULL);
-
-    if (sigaction_result == -1) {
-        die();
-    }
-
     int port = atoi(port_str);
 
     if (! port || port > 65535) {
@@ -191,6 +171,8 @@ int main(int argc, char ** const argv) {
     load_static_dir(static_dir);
 
     listen_for_connections(&my_addr);
+
+    free_static_dir();
 
     return 0;
 }

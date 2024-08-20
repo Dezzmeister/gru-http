@@ -41,6 +41,7 @@
 struct connection_thread {
     pthread_t thread;
     _Atomic int peer_fd;
+    _Atomic int started;
     _Atomic int active;
 };
 
@@ -140,6 +141,8 @@ static void * start_connection(void * thread_index) {
     const size_t thread_i = (size_t) thread_index;
     struct connection_thread * thread = threads + thread_i;
 
+    thread->started = 1;
+
     int status = start_connection_impl(thread);
 
     thread->active = 0;
@@ -161,14 +164,14 @@ void cancel_all_threads() {
 
 void join_finished_threads() {
     for (size_t i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].thread) {
+        if (threads[i].started) {
             int status = pthread_join(threads[i].thread, NULL);
 
             if (status == -1) {
                 perror("Failed to join thread");
             }
 
-            threads[i].thread = 0;
+            threads[i].started = 0;
         }
     }
 }

@@ -36,7 +36,7 @@ TEST_OBJS = \
 
 .PHONY: clean
 
-debug: CFLAGS += -g -Og -fsanitize=unreachable -fsanitize=undefined
+debug: CFLAGS += -g -Og -fsanitize=unreachable -fsanitize=undefined -fsanitize=thread
 debug: LDFLAGS += -lg
 release: CFLAGS += -O3 -march=native
 test: CFLAGS += -DTEST -fsanitize=unreachable -fsanitize=undefined
