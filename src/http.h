@@ -68,7 +68,7 @@ enum http_method {
     Connect = 5,
     Options = 6,
     Trace = 7,
-    Unknown = 64,
+    Unknown = 8,
 };
 
 extern const char * http_method_names[];

@@ -439,8 +439,13 @@ static http_status_code try_get_resource(struct http_res * res, struct http_req 
 
     int never_use_cache = global_options.cache_option == NeverUseCache;
     int must_use_cache = global_options.cache_option == AlwaysUseCache;
+    int will_use_cache = never_use_cache ||
+        (! must_use_cache &&
+         req->headers.known[REQ_HEADER_CACHE_CONTROL] &&
+         ! strcmp(req->headers.known[REQ_HEADER_CACHE_CONTROL], "no-cache")
+        );
 
-    if (never_use_cache || (! must_use_cache && ! strcmp(req->headers.known[REQ_HEADER_CACHE_CONTROL], "no-cache"))) {
+    if (will_use_cache) {
         reload_static_file(resource);
     }
 
