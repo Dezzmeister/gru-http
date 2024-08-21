@@ -108,7 +108,7 @@ int reload_static_file(struct file * file_entry) {
     size_t pos = 0;
     size_t bytes_read;
 
-    while ((bytes_read = read(fd, bytes + pos, statbuf.st_size - pos))) {
+    while ((bytes_read = read(fd, bytes + pos, statbuf.st_size - pos)) > 0) {
         if (bytes_read == -1) {
             free(bytes);
             snprintf(msg_buf, PATH_MAX * 2, "Failed to read from %s", path_buf);
@@ -156,7 +156,7 @@ struct file * read_full_file(const char * path, size_t root_offset) {
     char * bytes = malloc(statbuf.st_size);
     size_t pos = 0;
 
-    while ((status = read(fd, bytes + pos, statbuf.st_size - pos))) {
+    while ((status = read(fd, bytes + pos, statbuf.st_size - pos)) > 0) {
         if (status == -1) {
             printf("Error reading from %s\n", path);
             die();

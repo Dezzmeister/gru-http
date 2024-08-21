@@ -86,34 +86,32 @@ static int start_connection_impl(struct connection_thread * thread) {
     printf("[Thread %d] Receiving data\n", tid_for_printing);
 #endif
 
-    struct http_req req = create_http_req();
     // TODO: Non-blocking IO so we can disconnect clients that are too slow
-    while ((bytes_read = read(peer_fd, buf, RECV_BUF_SIZE - 1))) {
-        if (bytes_read == -1) {
-            snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to read data from socket", tid_for_printing);
-            perror(print_buf);
-            break;
-        } else {
-            buf[bytes_read] = 0;
+    while ((bytes_read = read(peer_fd, buf, RECV_BUF_SIZE - 1)) > 0) {
+        buf[bytes_read] = 0;
 #ifdef DEBUG_PRINT_RAW_REQ
-            write(1, buf, bytes_read);
+        write(1, buf, bytes_read);
 #endif
 
-            struct http_res res = handle_http_req(buf, bytes_read, &req);
+        struct http_req req = create_http_req();
+        struct http_res res = handle_http_req(buf, bytes_read, &req);
 #ifndef SUPPRESS_REQ_LOGS
-            print_http_req(&req, tid_for_printing);
+        print_http_req(&req, tid_for_printing);
 #endif
-            send_http_res(&res, peer_fd);
+        send_http_res(&res, peer_fd);
 #ifndef SUPPRESS_REQ_LOGS
-            print_http_res(&res, tid_for_printing);
+        print_http_res(&res, tid_for_printing);
 #endif
-            free_http_res(&res);
-            // Keep-Alive is not supported
-            break;
-        }
+        free_http_res(&res);
+        free_http_req(&req);
+        // Keep-Alive is not supported yet
+        break;
     }
 
-    free_http_req(&req);
+    if (bytes_read == -1) {
+        snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to read data from socket", tid_for_printing);
+        perror(print_buf);
+    }
 
 #ifndef SUPPRESS_REQ_LOGS
     printf("[Thread %d] Closing socket\n", tid_for_printing);
@@ -217,10 +215,15 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
     free(ip_str);
 
     struct sockaddr_in peer_sock;
-    int peer_sock_fd;
     socklen_t peer_len = sizeof peer_sock;
 
-    while ((peer_sock_fd = accept(sock_fd, (struct sockaddr *) &peer_sock, &peer_len)) != -1) {
+    while (1) {
+        int peer_sock_fd = accept(sock_fd, (struct sockaddr *) &peer_sock, &peer_len);
+
+        if (peer_sock_fd == -1) {
+            perror("Failed to accept connection");
+            continue;
+        }
 #ifndef SUPPRESS_REQ_LOGS
         char * const ip_str = fmt_ipv4_addr(peer_sock.sin_addr);
 
