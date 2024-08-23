@@ -80,7 +80,7 @@ struct http_req {
     size_t seek;
 };
 struct http_req create_http_req();
-void free_http_req(struct http_req * req);
+void reset_http_req(struct http_req * req);
 
 struct http_res {
     struct res_headers headers;
@@ -89,9 +89,9 @@ struct http_res {
     http_status_code status;
 };
 struct http_res create_http_res();
-void free_http_res(struct http_res * res);
+void reset_http_res(struct http_res * res);
 
-struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req);
+void handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req, struct http_res * res);
 void send_http_res(struct http_res * res, int out_sock_fd);
 
 #endif

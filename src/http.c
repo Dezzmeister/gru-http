@@ -292,7 +292,7 @@ struct http_req create_http_req() {
     return out;
 }
 
-void free_http_req(struct http_req * req) {
+void reset_http_req(struct http_req * req) {
     for (size_t i = 0; i < REQ_HEADER_MAX; i++) {
         if (req->headers.known[i]) {
             free(req->headers.known[i]);
@@ -302,6 +302,8 @@ void free_http_req(struct http_req * req) {
     if (req->target) {
         free(req->target);
     }
+
+    *req = create_http_req();
 }
 
 struct http_res create_http_res() {
@@ -320,12 +322,14 @@ struct http_res create_http_res() {
     return out;
 }
 
-void free_http_res(struct http_res * res) {
+void reset_http_res(struct http_res * res) {
     for (size_t i = 0; i < RES_HEADER_MAX; i++) {
         if (res->headers.headers[i]) {
             free(res->headers.headers[i]);
         }
     }
+
+    *res = create_http_res();
 }
 
 static void set_http_status(struct http_res * res, http_status_code status) {
@@ -465,35 +469,32 @@ static http_status_code try_get_resource(struct http_res * res, struct http_req 
     return 0;
 }
 
-struct http_res handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req) {
+void handle_http_req(const char * in_buf, size_t buf_size, struct http_req * req, struct http_res * res) {
     http_status_code req_line_status = parse_req_line(in_buf, buf_size, req);
-    struct http_res out = create_http_res();
 
     if (req_line_status) {
-        set_http_status(&out, req_line_status);
+        set_http_status(res, req_line_status);
 
-        return out;
+        return;
     }
 
     http_status_code field_lines_status = parse_field_lines(in_buf, buf_size, req);
 
     if (field_lines_status) {
-        set_http_status(&out, field_lines_status);
+        set_http_status(res, field_lines_status);
 
-        return out;
+        return;
     }
 
-    http_status_code get_resource_status = try_get_resource(&out, req);
+    http_status_code get_resource_status = try_get_resource(res, req);
 
     if (get_resource_status) {
-        set_http_status(&out, get_resource_status);
+        set_http_status(res, get_resource_status);
 
-        return out;
+        return;
     }
 
-    set_http_status(&out, HTTP_OK);
-
-    return out;
+    set_http_status(res, HTTP_OK);
 }
 
 static void status_to_str(http_status_code status, char out[4]) {

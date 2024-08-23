@@ -40,6 +40,8 @@
 
 struct connection_thread {
     pthread_t thread;
+    struct http_req req;
+    struct http_res res;
     _Atomic int peer_fd;
     _Atomic int started;
     _Atomic int active;
@@ -93,17 +95,14 @@ static int start_connection_impl(struct connection_thread * thread) {
         write(1, buf, bytes_read);
 #endif
 
-        struct http_req req = create_http_req();
-        struct http_res res = handle_http_req(buf, bytes_read, &req);
+        handle_http_req(buf, bytes_read, &thread->req, &thread->res);
 #ifndef SUPPRESS_REQ_LOGS
-        print_http_req(&req, tid_for_printing);
+        print_http_req(&thread->req, tid_for_printing);
 #endif
-        send_http_res(&res, peer_fd);
+        send_http_res(&thread->res, peer_fd);
 #ifndef SUPPRESS_REQ_LOGS
-        print_http_res(&res, tid_for_printing);
+        print_http_res(&thread->res, tid_for_printing);
 #endif
-        free_http_res(&res);
-        free_http_req(&req);
         // Keep-Alive is not supported yet
         break;
     }
@@ -141,8 +140,19 @@ static void * start_connection(void * thread_index) {
 
     thread->started = 1;
 
+    char thread_name[16];
+
+    snprintf(thread_name, 16, "handler %d", (uint8_t) thread_i);
+    int setname_result = pthread_setname_np(thread->thread, thread_name);
+
+    if (setname_result) {
+        perror("Failed to set handler thread name");
+    }
+
     int status = start_connection_impl(thread);
 
+    reset_http_req(&thread->req);
+    reset_http_res(&thread->res);
     thread->active = 0;
 
     return (void *) (uint64_t) status;
@@ -174,7 +184,16 @@ void join_finished_threads() {
     }
 }
 
+void init_shared_memory() {
+    for (size_t i = 0; i < MAX_THREADS; i++) {
+        threads[i].req = create_http_req();
+        threads[i].res = create_http_res();
+    }
+}
+
 void listen_for_connections(const struct sockaddr_in * my_addr) {
+    init_shared_memory();
+
     struct protoent * ent = getprotobyname("tcp");
 
     if (! ent) {
