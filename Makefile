@@ -14,7 +14,8 @@ HEADERS = \
 		${INC_DIR}/http.h \
 		${INC_DIR}/status.h \
 		${INC_DIR}/error.h \
-		${INC_DIR}/files.h
+		${INC_DIR}/files.h \
+		${INC_DIR}/params.h
 
 OBJS = \
 		${SRC_DIR}/main.o  \

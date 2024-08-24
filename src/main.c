@@ -16,13 +16,12 @@
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Uncomment this to print raw request data
-// #define DEBUG_PRINT_RAW_REQ
 #include <argp.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include "params.h"
 #include "error.h"
 #include "files.h"
 #include "http.h"

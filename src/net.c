@@ -16,18 +16,12 @@
  * along with gru-http.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
-// Uncomment this to suppress stdout for each request
-// #define SUPPRESS_REQ_LOGS
-//
-// Uncomment this to use error-checking locks instead of fast locks
-#define DEBUG_LOCKS
-
 #define _GNU_SOURCE
 #include <errno.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <unistd.h>
+#include "params.h"
 #include "error.h"
 #include "http.h"
 #include "ip.h"
@@ -37,7 +31,6 @@
 #include "status.h"
 #endif
 
-#define MAX_THREADS     32
 #define RECV_BUF_SIZE   8192
 #define PRINT_BUF_SIZE  512
 
@@ -56,7 +49,7 @@ struct connection_thread {
     struct locked_thread_fields locked;
 };
 
-struct connection_thread threads[MAX_THREADS] = { 0 };
+struct connection_thread threads[MAX_CONNECTION_THREADS] = { 0 };
 
 #ifdef DEBUG_LOCKS
 #define checked_lock(lock) { \
@@ -205,7 +198,7 @@ static void * start_connection(void * thread_index) {
 }
 
 void cancel_all_threads() {
-    for (size_t i = 0; i < MAX_THREADS; i++) {
+    for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
         checked_lock(&threads[i].lock);
         if (threads[i].locked.active) {
             int status = pthread_cancel(threads[i].thread);
@@ -219,7 +212,7 @@ void cancel_all_threads() {
 }
 
 void join_finished_threads() {
-    for (size_t i = 0; i < MAX_THREADS; i++) {
+    for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
         checked_lock(&threads[i].lock);
         if (threads[i].locked.started && ! threads[i].locked.active) {
             int status = pthread_join(threads[i].thread, NULL);
@@ -248,7 +241,7 @@ void init_shared_memory() {
         die();
     }
 
-    for (size_t i = 0; i < MAX_THREADS; i++) {
+    for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
         pthread_mutex_init(&threads[i].lock, &mutexattr);
 
         threads[i].req = create_http_req();
@@ -326,7 +319,7 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
         while (1) {
             join_finished_threads();
 
-            for (size_t i = 0; i < MAX_THREADS; i++) {
+            for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
                 checked_lock(&threads[i].lock);
                 if (! threads[i].locked.active) {
                     thread_i = i;
