@@ -19,6 +19,9 @@
 
 // Uncomment this to suppress stdout for each request
 // #define SUPPRESS_REQ_LOGS
+//
+// Uncomment this to use error-checking locks instead of fast locks
+#define DEBUG_LOCKS
 
 #define _GNU_SOURCE
 #include <errno.h>
@@ -38,16 +41,53 @@
 #define RECV_BUF_SIZE   8192
 #define PRINT_BUF_SIZE  512
 
+struct locked_thread_fields {
+    int peer_fd;
+    int started;
+    int active;
+};
+
 struct connection_thread {
     pthread_t thread;
     struct http_req req;
     struct http_res res;
-    _Atomic int peer_fd;
-    _Atomic int started;
-    _Atomic int active;
+
+    pthread_mutex_t lock;
+    struct locked_thread_fields locked;
 };
 
 struct connection_thread threads[MAX_THREADS] = { 0 };
+
+#ifdef DEBUG_LOCKS
+#define checked_lock(lock) { \
+    int result = pthread_mutex_lock((lock)); \
+    switch (result) { \
+        case EINVAL: { \
+            printf("Error locking mutex: EINVAL, %s, %d\n", __FILE__, __LINE__); \
+            break; \
+        } \
+        case EDEADLK: { \
+            printf("Error locking mutex: EDEADLK, %s, %d\n", __FILE__, __LINE__); \
+        } \
+    } \
+}
+
+#define checked_unlock(lock) { \
+    int result = pthread_mutex_unlock((lock)); \
+    switch (result) { \
+        case EINVAL: { \
+            printf("Error unlocking mutex: EINVAL, %s, %d\n", __FILE__, __LINE__); \
+            break; \
+        } \
+        case EPERM: { \
+            printf("Error unlocking mutex: EDEADLK, %s, %d\n", __FILE__, __LINE__); \
+        } \
+    } \
+}
+#else
+#define checked_lock pthread_mutex_lock
+#define checked_unlock pthread_mutex_unlock
+#endif
 
 #ifndef SUPPRESS_REQ_LOGS
 static void print_http_req(struct http_req * req, pid_t tid) {
@@ -76,7 +116,9 @@ static void print_http_res(struct http_res * res, pid_t tid) {
 #endif
 
 static int start_connection_impl(struct connection_thread * thread) {
-    int peer_fd = thread->peer_fd;
+    checked_lock(&thread->lock);
+    int peer_fd = thread->locked.peer_fd;
+    checked_unlock(&thread->lock);
     char buf[RECV_BUF_SIZE];
     int bytes_read;
 
@@ -138,7 +180,9 @@ static void * start_connection(void * thread_index) {
     const size_t thread_i = (size_t) thread_index;
     struct connection_thread * thread = threads + thread_i;
 
-    thread->started = 1;
+    checked_lock(&thread->lock);
+    thread->locked.started = 1;
+    checked_unlock(&thread->lock);
 
     char thread_name[16];
 
@@ -153,42 +197,65 @@ static void * start_connection(void * thread_index) {
 
     reset_http_req(&thread->req);
     reset_http_res(&thread->res);
-    thread->active = 0;
+    checked_lock(&thread->lock);
+    thread->locked.active = 0;
+    checked_unlock(&thread->lock);
 
     return (void *) (uint64_t) status;
 }
 
 void cancel_all_threads() {
     for (size_t i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].active) {
+        checked_lock(&threads[i].lock);
+        if (threads[i].locked.active) {
             int status = pthread_cancel(threads[i].thread);
 
             if (status == -1) {
                 perror("Failed to cancel thread");
             }
         }
+        checked_unlock(&threads[i].lock);
     }
 }
 
 void join_finished_threads() {
     for (size_t i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].started) {
+        checked_lock(&threads[i].lock);
+        if (threads[i].locked.started && ! threads[i].locked.active) {
             int status = pthread_join(threads[i].thread, NULL);
 
-            if (status == -1) {
+            if (status) {
                 perror("Failed to join thread");
             }
 
-            threads[i].started = 0;
+            threads[i].locked.started = 0;
         }
+        checked_unlock(&threads[i].lock);
     }
 }
 
 void init_shared_memory() {
+    pthread_mutexattr_t mutexattr;
+
+    pthread_mutexattr_init(&mutexattr);
+#ifdef DEBUG_LOCKS
+    int result = pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_ERRORCHECK_NP);
+#else
+    int result = pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_FAST_NP);
+#endif
+
+    if (result) {
+        die();
+    }
+
     for (size_t i = 0; i < MAX_THREADS; i++) {
+        pthread_mutex_init(&threads[i].lock, &mutexattr);
+
         threads[i].req = create_http_req();
         threads[i].res = create_http_res();
     }
+
+    pthread_mutexattr_destroy(&mutexattr);
 }
 
 void listen_for_connections(const struct sockaddr_in * my_addr) {
@@ -260,23 +327,28 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
             join_finished_threads();
 
             for (size_t i = 0; i < MAX_THREADS; i++) {
-                if (! threads[i].active) {
+                checked_lock(&threads[i].lock);
+                if (! threads[i].locked.active) {
                     thread_i = i;
+                    checked_unlock(&threads[i].lock);
                     goto thread_i_found;
                 }
+                checked_unlock(&threads[i].lock);
             }
 
             // We'll wait for a thread to die
             sleep(1);
         }
         thread_i_found:
-        threads[thread_i].peer_fd = peer_sock_fd;
-        threads[thread_i].active = 1;
+        checked_lock(&threads[thread_i].lock);
+        threads[thread_i].locked.peer_fd = peer_sock_fd;
+        threads[thread_i].locked.active = 1;
+        checked_unlock(&threads[thread_i].lock);
 
         int status = pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
 
-        if (status == -1) {
-            perror("Failed to start thread:");
+        if (status) {
+            perror("Failed to start thread");
         }
     }
 
