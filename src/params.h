@@ -26,7 +26,11 @@
 // This controls how many connection threads the program is allowed to have at
 // any one time. This count does not include other threads, such as the main
 // thread.
-#define MAX_CONNECTION_THREADS     32
+#define MAX_CONNECTION_THREADS      32
+
+// The number of milliseconds to wait for a client to send data before disconnecting
+// them.
+#define POLL_TIMEOUT_MS             10000
 
 // Uncomment this to suppress printing details of every request and response to
 // stdout. Doing this can greatly increase the program's ability to handle many

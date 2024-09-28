@@ -19,6 +19,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <netdb.h>
+#include <poll.h>
 #include <stdio.h>
 #include <unistd.h>
 #include "params.h"
@@ -113,7 +114,6 @@ static int start_connection_impl(struct connection_thread * thread) {
     int peer_fd = thread->locked.peer_fd;
     checked_unlock(&thread->lock);
     char buf[RECV_BUF_SIZE];
-    int bytes_read;
 
     char print_buf[PRINT_BUF_SIZE];
     print_buf[PRINT_BUF_SIZE - 1] = 0;
@@ -123,35 +123,46 @@ static int start_connection_impl(struct connection_thread * thread) {
     printf("[Thread %d] Receiving data\n", tid_for_printing);
 #endif
 
-    // TODO: Non-blocking IO so we can disconnect clients that are too slow
-    while ((bytes_read = read(peer_fd, buf, RECV_BUF_SIZE - 1)) > 0) {
-        buf[bytes_read] = 0;
-#ifdef DEBUG_PRINT_RAW_REQ
-        write(1, buf, bytes_read);
-#endif
+    struct pollfd poll_arg = {
+        .fd = peer_fd,
+        .events = POLLIN
+    };
 
-        handle_http_req(buf, bytes_read, &thread->req, &thread->res);
-#ifndef SUPPRESS_REQ_LOGS
-        print_http_req(&thread->req, tid_for_printing);
-#endif
-        send_http_res(&thread->res, peer_fd);
-#ifndef SUPPRESS_REQ_LOGS
-        print_http_res(&thread->res, tid_for_printing);
-#endif
-        // Keep-Alive is not supported yet
-        break;
-    }
+    int status = poll(&poll_arg, 1, POLL_TIMEOUT_MS);
 
-    if (bytes_read == -1) {
-        snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to read data from socket", tid_for_printing);
+    if (status == -1) {
+        snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to poll socket", tid_for_printing);
         perror(print_buf);
+    } else if (status == 0) {
+        snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Timed out while polling socket", tid_for_printing);
+    } else {
+        // TODO: Call `poll` and `read` in a loop, and support Keep-Alive
+        int bytes_read = read(peer_fd, buf, RECV_BUF_SIZE - 1);
+
+        if (bytes_read > 0) {
+            buf[bytes_read] = 0;
+#ifdef DEBUG_PRINT_RAW_REQ
+            write(1, buf, bytes_read);
+#endif
+
+            handle_http_req(buf, bytes_read, &thread->req, &thread->res);
+#ifndef SUPPRESS_REQ_LOGS
+            print_http_req(&thread->req, tid_for_printing);
+#endif
+            send_http_res(&thread->res, peer_fd);
+#ifndef SUPPRESS_REQ_LOGS
+            print_http_res(&thread->res, tid_for_printing);
+#endif
+        } else if (bytes_read == -1) {
+            snprintf(print_buf, PRINT_BUF_SIZE, "[Thread %d] Failed to read data from socket", tid_for_printing);
+            perror(print_buf);
+        }
     }
 
 #ifndef SUPPRESS_REQ_LOGS
     printf("[Thread %d] Closing socket\n", tid_for_printing);
 #endif
-    // TODO: Fix sockets ending up in TIME_WAIT
-    int status = shutdown(peer_fd, SHUT_RDWR);
+    status = shutdown(peer_fd, SHUT_RDWR);
 
     if (status == -1) {
         perror("Failed to call 'shutdown' on socket");
