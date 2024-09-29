@@ -37,12 +37,16 @@ TEST_OBJS = \
 
 .PHONY: clean
 
-debug: CFLAGS += -g -Og -fsanitize=unreachable -fsanitize=undefined -fsanitize=thread
+debug: CFLAGS += -g -Og -fsanitize=unreachable -fsanitize=undefined
 debug: LDFLAGS += -lg
 release: CFLAGS += -O3 -march=native
 test: CFLAGS += -DTEST -fsanitize=unreachable -fsanitize=undefined
 memtest: CFLAGS += -g -Og -DTEST -fsanitize=unreachable -fsanitize=undefined
 memtest: LDFLAGS += -lg
+drdtest: CFLAGS += -g -Og -DTEST -fsanitize=unreachable -fsanitize=undefined
+drdtest: LDFLAGS += -lg
+massiftest: CFLAGS += -g -Og -DTEST -fsanitize=unreachable -fsanitize=undefined
+massiftest: LDFLAGS += -lg
 invtest: CFLAGS += -DTEST -fsanitize=unreachable -fsanitize=undefined -DINVERT_EXPECT
 
 debug: ${OBJS}
@@ -56,6 +60,12 @@ test: ${OBJS_NO_MAIN} ${TEST_OBJS}
 
 memtest: ${OBJS}
 	${CC} ${LDFLAGS} -o ${TEST_BINARY} $^ ${CFLAGS} && valgrind --track-origins=yes --leak-check=full --show-leak-kinds=all ./${TEST_BINARY} ${ARGS} ; rm -f ./${TEST_BINARY}
+
+drdtest: ${OBJS}
+	${CC} ${LDFLAGS} -o ${TEST_BINARY} $^ ${CFLAGS} && valgrind --tool=drd --exclusive-threshold=1000 ./${TEST_BINARY} ${ARGS} ; rm -f ./${TEST_BINARY}
+
+massiftest: ${OBJS}
+	${CC} ${LDFLAGS} -o ${TEST_BINARY} $^ ${CFLAGS} && valgrind --tool=massif ./${TEST_BINARY} ${ARGS} ; rm -f ./${TEST_BINARY}
 
 invtest: ${OBJS_NO_MAIN} ${TEST_OBJS}
 	${CC} -o ${TEST_BINARY} $^ ${CFLAGS} && ./${TEST_BINARY} ${PATTERN} ; rm -f ./${TEST_BINARY}

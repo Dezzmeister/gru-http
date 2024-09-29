@@ -21,6 +21,7 @@
 #include <netdb.h>
 #include <poll.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include "params.h"
 #include "error.h"
@@ -51,6 +52,11 @@ struct connection_thread {
 };
 
 struct connection_thread threads[MAX_CONNECTION_THREADS] = { 0 };
+
+enum user_command {
+    None = 0,
+    Quit = 1
+};
 
 #ifdef DEBUG_LOCKS
 #define checked_lock(lock) { \
@@ -199,27 +205,11 @@ static void * start_connection(void * thread_index) {
 
     int status = start_connection_impl(thread);
 
-    reset_http_req(&thread->req);
-    reset_http_res(&thread->res);
     checked_lock(&thread->lock);
     thread->locked.active = 0;
     checked_unlock(&thread->lock);
 
     return (void *) (uint64_t) status;
-}
-
-void cancel_all_threads() {
-    for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
-        checked_lock(&threads[i].lock);
-        if (threads[i].locked.active) {
-            int status = pthread_cancel(threads[i].thread);
-
-            if (status == -1) {
-                perror("Failed to cancel thread");
-            }
-        }
-        checked_unlock(&threads[i].lock);
-    }
 }
 
 void join_finished_threads() {
@@ -233,6 +223,8 @@ void join_finished_threads() {
             }
 
             threads[i].locked.started = 0;
+            reset_http_req(&threads[i].req);
+            reset_http_res(&threads[i].res);
         }
         checked_unlock(&threads[i].lock);
     }
@@ -260,6 +252,19 @@ void init_shared_memory() {
     }
 
     pthread_mutexattr_destroy(&mutexattr);
+}
+
+enum user_command get_user_command() {
+    static char buf[256];
+
+    int bytes_read = read(STDIN_FILENO, buf, ((sizeof buf) / sizeof(char)) - 1);
+    buf[bytes_read] = 0;
+
+    if (! strcmp(buf, "q\n")) {
+        return Quit;
+    }
+
+    return None;
 }
 
 void listen_for_connections(const struct sockaddr_in * my_addr) {
@@ -301,61 +306,127 @@ void listen_for_connections(const struct sockaddr_in * my_addr) {
     char * ip_str = fmt_ipv4_addr(my_addr->sin_addr);
 
     printf("Listening on %s:%d\n", ip_str, ntohs(my_addr->sin_port));
+    printf("Send 'q' to quit\n");
 
     free(ip_str);
 
     struct sockaddr_in peer_sock;
     socklen_t peer_len = sizeof peer_sock;
 
-    while (1) {
-        int peer_sock_fd = accept(sock_fd, (struct sockaddr *) &peer_sock, &peer_len);
+    struct pollfd poll_arg[2] = {
+        {
+            .fd = sock_fd,
+            .events = POLLIN
+        },
+        {
+            .fd = STDIN_FILENO,
+            .events = POLLIN
+        }
+    };
 
-        if (peer_sock_fd == -1) {
-            perror("Failed to accept connection");
+    while (1) {
+        int status = poll(poll_arg, sizeof(poll_arg) / sizeof(struct pollfd), -1);
+
+        if (status == -1) {
+            perror("Failed to poll stdin and listen socket");
             continue;
         }
-#ifndef SUPPRESS_REQ_LOGS
-        char * const ip_str = fmt_ipv4_addr(peer_sock.sin_addr);
 
-        if (ip_str) {
-            printf("Accepted a connection from %s:%d\n", ip_str, peer_sock.sin_port);
-            free(ip_str);
-        } else {
-            printf("IP string was null\n");
+        if (status == 0) {
+            perror("Timed out while polling stdin and listen socket");
+            continue;
         }
+
+        if (poll_arg[1].revents) {
+            if (poll_arg[1].revents & POLLIN) {
+                enum user_command cmd = get_user_command();
+
+                switch (cmd) {
+                    case Quit: {
+                        goto shutdown;
+                    };
+                    case None: {
+                        break;
+                    };
+                }
+            } else {
+                printf("Poll error event on stdin: %d\n", poll_arg[1].revents);
+            }
+        }
+
+        if (poll_arg[0].revents) {
+            if (poll_arg[0].revents & POLLIN) {
+                int peer_sock_fd = accept(sock_fd, (struct sockaddr *) &peer_sock, &peer_len);
+
+                if (peer_sock_fd == -1) {
+                    perror("Failed to accept connection");
+                    continue;
+                }
+#ifndef SUPPRESS_REQ_LOGS
+                char * const ip_str = fmt_ipv4_addr(peer_sock.sin_addr);
+
+                if (ip_str) {
+                    printf("Accepted a connection from %s:%d\n", ip_str, peer_sock.sin_port);
+                    free(ip_str);
+                } else {
+                    printf("IP string was null\n");
+                }
 #endif
 
-        size_t thread_i;
+                size_t thread_i;
 
-        while (1) {
-            join_finished_threads();
+                while (1) {
+                    join_finished_threads();
 
-            for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
-                checked_lock(&threads[i].lock);
-                if (! threads[i].locked.active) {
-                    thread_i = i;
-                    checked_unlock(&threads[i].lock);
-                    goto thread_i_found;
+                    for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
+                        checked_lock(&threads[i].lock);
+                        if (! threads[i].locked.started && ! threads[i].locked.active) {
+                            thread_i = i;
+                            checked_unlock(&threads[i].lock);
+                            goto thread_i_found;
+                        }
+                        checked_unlock(&threads[i].lock);
+                    }
+
+                    // We'll wait for a thread to die
+                    sleep(1);
                 }
-                checked_unlock(&threads[i].lock);
+                thread_i_found:
+                checked_lock(&threads[thread_i].lock);
+                threads[thread_i].locked.peer_fd = peer_sock_fd;
+                threads[thread_i].locked.active = 1;
+                checked_unlock(&threads[thread_i].lock);
+
+                int status = pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
+
+                if (status) {
+                    perror("Failed to start thread");
+                }
+            } else {
+                printf("Poll error event on listen socket: %d\n", poll_arg[1].revents);
             }
-
-            // We'll wait for a thread to die
-            sleep(1);
-        }
-        thread_i_found:
-        checked_lock(&threads[thread_i].lock);
-        threads[thread_i].locked.peer_fd = peer_sock_fd;
-        threads[thread_i].locked.active = 1;
-        checked_unlock(&threads[thread_i].lock);
-
-        int status = pthread_create(&threads[thread_i].thread, NULL, start_connection, (void *) thread_i);
-
-        if (status) {
-            perror("Failed to start thread");
         }
     }
 
+shutdown:
     printf("Shutting down...\n");
     close(sock_fd);
+
+    for (size_t i = 0; i < MAX_CONNECTION_THREADS; i++) {
+        int should_join = 0;
+        checked_lock(&threads[i].lock);
+        should_join = threads[i].locked.started || threads[i].locked.active;
+        checked_unlock(&threads[i].lock);
+
+        if (should_join) {
+            int status = pthread_join(threads[i].thread, NULL);
+
+            if (status) {
+                perror("Failed to join thread");
+            }
+
+            reset_http_req(&threads[i].req);
+            reset_http_res(&threads[i].res);
+        }
+    }
 }

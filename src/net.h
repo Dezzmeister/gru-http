@@ -22,7 +22,6 @@
 #include <pthread.h>
 
 void listen_for_connections(const struct sockaddr_in * my_addr);
-void cancel_all_threads();
 void join_finished_threads();
 
 #endif
