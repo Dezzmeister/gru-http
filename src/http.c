@@ -408,6 +408,8 @@ static char * get_content_type(char * filename) {
             content_type = "image/jpeg";
         } else if (! strcmp_ignore_case(filename + start, "jpeg")) {
             content_type = "image/jpeg";
+        } else if (! strcmp_ignore_case(filename + start, "svg")) {
+            content_type = "image/svg+xml";
         } else {
             content_type = "application/octet-stream";
         }

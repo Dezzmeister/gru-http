@@ -185,9 +185,10 @@ struct file * read_full_file(const char * path, size_t root_offset) {
 static struct file * read_full_dir(char * root_dir_name) {
     struct dir_stack * last_dir = malloc(sizeof(struct dir_stack));
     struct dir_stack * top_dir = last_dir;
+    size_t root_dir_len = strlen(root_dir_name);
 
     last_dir->next = NULL;
-    last_dir->path_len = strlen(root_dir_name);
+    last_dir->path_len = root_dir_len;
 
     if (last_dir->path_len > PATH_MAX) {
         printf("Path must not be longer than %d characters: %s\n", PATH_MAX, root_dir_name);
@@ -254,7 +255,7 @@ static struct file * read_full_dir(char * root_dir_name) {
                 memcpy(tmp_buf, last_dir->path, last_dir->path_len + 1);
                 path_join(tmp_buf, ent->d_name, last_dir->path_len);
 
-                struct file * next_file = read_full_file(tmp_buf, last_dir->path_len);
+                struct file * next_file = read_full_file(tmp_buf, root_dir_len);
 
                 if (! files) {
                     files = next_file;
